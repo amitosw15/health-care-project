@@ -1,0 +1,23 @@
+[project]
+name = "my_research_tool"
+version = "0.1.0"
+description = "A CLI wrapper for the research simulation and analysis tools"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+requires-python = ">=3.8"
+dependencies = [
+  "python-dotenv",
+  "typer",
+  "pandas",
+  "numpy",
+  "scikit-learn",
+  "seaborn",
+  "matplotlib",
+  "umap-learn",
+  "pytest"
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

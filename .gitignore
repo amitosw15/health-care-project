@@ -1,0 +1,8 @@
+﻿__pycache__/
+*.pyc
+event_data_cache_sessions_distinct.csv
+full_experiment_results.csv
+*.png
+patient_params/
+venv/
+.pytest_cache/

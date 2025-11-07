@@ -1,0 +1,49 @@
+{
+  "persona": "Compulsive Checker",
+  "schedule": {
+    "Work": [9, 17],
+    "Recreation": [17, 23],
+    "Night": [23, 9]
+  },
+  "day_parts": [
+    {"name": "Work", "start_hour": 9, "end_hour": 17},
+    {"name": "Recreation", "start_hour": 17, "end_hour": 23},
+    {"name": "Night", "start_hour": 23, "end_hour": 9}
+  ],
+  "period_matrices": {
+    "Work": {
+      "News": {"News": 0.05, "Social": 0.05, "Game": 0.00, "Work": 0.75, "Utility": 0.15},
+      "Social": {"News": 0.05, "Social": 0.05, "Game": 0.00, "Work": 0.75, "Utility": 0.15},
+      "Game": {"News": 0.05, "Social": 0.05, "Game": 0.00, "Work": 0.80, "Utility": 0.10},
+      "Work": {"News": 0.02, "Social": 0.03, "Game": 0.00, "Work": 0.90, "Utility": 0.05},
+      "Utility": {"News": 0.02, "Social": 0.03, "Game": 0.00, "Work": 0.90, "Utility": 0.05}
+    },
+    "Recreation": {
+      "News": {"News": 0.15, "Social": 0.45, "Game": 0.25, "Work": 0.05, "Utility": 0.10},
+      "Social": {"News": 0.10, "Social": 0.50, "Game": 0.25, "Work": 0.05, "Utility": 0.10},
+      "Game": {"News": 0.05, "Social": 0.35, "Game": 0.45, "Work": 0.05, "Utility": 0.10},
+      "Work": {"News": 0.05, "Social": 0.60, "Game": 0.25, "Work": 0.00, "Utility": 0.10},
+      "Utility": {"News": 0.05, "Social": 0.55, "Game": 0.30, "Work": 0.00, "Utility": 0.10}
+    },
+    "Night": {
+      "News": {"News": 0.30, "Social": 0.60, "Game": 0.05, "Work": 0.00, "Utility": 0.05},
+      "Social": {"News": 0.25, "Social": 0.65, "Game": 0.05, "Work": 0.00, "Utility": 0.05},
+      "Game": {"News": 0.10, "Social": 0.70, "Game": 0.15, "Work": 0.00, "Utility": 0.05},
+      "Work": {"News": 0.10, "Social": 0.85, "Game": 0.05, "Work": 0.00, "Utility": 0.00},
+      "Utility": {"News": 0.10, "Social": 0.75, "Game": 0.10, "Work": 0.00, "Utility": 0.05}
+    }
+  },
+  "period_marginals": {
+    "Work": {"Work": 0.80, "Utility": 0.10, "News": 0.05, "Social": 0.04, "Game": 0.01},
+    "Recreation": {"Social": 0.50, "Game": 0.28, "News": 0.12, "Utility": 0.06, "Work": 0.04},
+    "Night": {"Social": 0.65, "News": 0.20, "Game": 0.10, "Utility": 0.03, "Work": 0.02}
+  },
+  "timing_params": {
+    "session_start_dist": {"type": "exponential", "scale": 1200},
+    "session_length_dist": {"type": "poisson", "lambda": 6},
+    "app_duration_dist": {"type": "exponential", "scale": 30},
+    "inter_event_gap_dist": {"type": "exponential", "scale": 3},
+    "aside_prob": 0.25,
+    "aside_duration_dist": {"type": "exponential", "scale": 120}
+  }
+}
