@@ -105,7 +105,8 @@ def get_next_app(current_app, transition_matrix, marginals):
 
 def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
                                         all_persona_params,
-                                        session_lambda_override=None):
+                                        session_lambda_override=None,
+                                        session_start_override=None):
     """
     Generates a full event stream for all patients.
 
@@ -144,6 +145,12 @@ def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
                 print(f"Warning: 'session_length_dist' not in timing_params for {persona_name}.")
 
         # --- End of new logic ---
+        if session_start_override is not None:
+            if 'session_start_dist' in timing_params:
+                timing_params['session_start_dist']['value'] = session_start_override
+                timing_params['session_start_dist']['type'] = 'fixed'
+            else:
+                print(f"Warning: 'session_length_dist' not in timing_params for {persona_name}.")
 
         patient_time = start_sim_time # Each patient starts at the beginning
         session_id_counter = 0
@@ -592,7 +599,8 @@ if __name__ == "__main__":
             ALL_PATIENT_IDS,
             PERSONA_MAP,
             all_persona_params,
-            session_lambda_override=session_lambda # This is the experiment variable
+            session_lambda_override=session_lambda, # This is the experiment variable
+            session_start_override=100
         )
 
         # Save the generated data for this run to a unique file

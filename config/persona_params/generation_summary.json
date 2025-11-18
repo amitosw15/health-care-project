@@ -1,0 +1,13 @@
+[
+  {
+    "lambda": 10,
+    "images_theoretical": [
+      "config/persona_params/theoretical_persona_9-to-5er_matrices.png",
+      "config/persona_params/theoretical_persona_Night_Owl_matrices.png",
+      "config/persona_params/theoretical_persona_Influencer_matrices.png",
+      "config/persona_params/theoretical_persona_Compulsive_Checker_matrices.png"
+    ],
+    "events_file": "event_data_cache_sessions_distinct_lambda_10.csv",
+    "events_rows": 460244
+  }
+]

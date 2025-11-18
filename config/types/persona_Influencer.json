@@ -1,0 +1,37 @@
+{
+  "persona": "Influencer",
+  "schedule": {"Active":[8,0],"Sleep":[0,8]},
+  "day_parts": [
+    {"name":"Active","start_hour":8,"end_hour":0},
+    {"name":"Sleep","start_hour":0,"end_hour":8},
+    {"name":"Active_pad","start_hour":8,"end_hour":0}
+  ],
+  "period_matrices": {
+    "Active": {
+      "News": {"News": 0.05, "Social": 0.95, "Game": 0.0, "Work": 0.0, "Utility": 0.0, "Quit": 0.0},
+      "Social": {"News": 0.05, "Social": 0.95, "Game": 0.0, "Work": 0.0, "Utility": 0.0, "Quit": 0.0},
+      "Game": {"News": 0.10, "Social": 0.90, "Game": 0.0, "Work": 0.0, "Utility": 0.0, "Quit": 0.0},
+      "Work": {"News": 0.10, "Social": 0.90, "Game": 0.0, "Work": 0.0, "Utility": 0.0, "Quit": 0.0},
+      "Utility": {"News": 0.10, "Social": 0.90, "Game": 0.0, "Work": 0.0, "Utility": 0.0, "Quit": 0.0}
+    },
+    "Sleep": {
+      "News": {"News": 0.10, "Social": 0.40, "Game": 0.30, "Work": 0.05, "Utility": 0.15, "Quit": 0.0},
+      "Social": {"News": 0.10, "Social": 0.40, "Game": 0.30, "Work": 0.05, "Utility": 0.15, "Quit": 0.0},
+      "Game": {"News": 0.10, "Social": 0.50, "Game": 0.20, "Work": 0.05, "Utility": 0.15, "Quit": 0.0},
+      "Work": {"News": 0.10, "Social": 0.60, "Game": 0.20, "Work": 0.0, "Utility": 0.10, "Quit": 0.0},
+      "Utility": {"News": 0.10, "Social": 0.60, "Game": 0.20, "Work": 0.0, "Utility": 0.10, "Quit": 0.0}
+    }
+  },
+  "period_marginals": {
+    "Active": {"Social": 0.8, "News": 0.15, "Utility": 0.05, "Game": 0.0, "Work": 0.0},
+    "Sleep": {"Social": 0.4, "News": 0.3, "Game": 0.2, "Utility": 0.05, "Work": 0.05}
+  },
+  "timing_params": {
+    "session_start_dist": {"type": "exponential", "scale": 600},
+    "session_length_dist": {"type": "fixed", "value": 3},
+    "app_duration_dist": {"type": "exponential", "scale": 60},
+    "inter_event_gap_dist": {"type": "exponential", "scale": 5},
+    "aside_prob": 0.0,
+    "aside_duration_dist": {"type": "exponential", "scale": 300}
+  }
+}

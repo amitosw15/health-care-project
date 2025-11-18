@@ -1,0 +1,80 @@
+﻿# Global configuration extracted from oracle.py (static defaults).
+# This file holds the non-matrix configuration (timing, seeds, schedules, paths).
+# Period transition matrices & persona-specific marginals remain in persona JSONs under ../persona_params/.
+
+event_cache_path: "event_data_cache_sessions_distinct.csv"
+param_dir: "config/persona_params"
+persona_types_path:
+  "9-to-5er": "config/types/persona_9-to-5er.json"
+  "Compulsive Checker": "config/types/persona_Compulsive_Checker.json"
+  "Night Owl": "config/types/persona_Night_Owl.json"
+  "Influencer": "config/types/persona_Influencer.json"
+# simulation framing
+hours_per_day: 24
+days_per_week: 7
+num_weeks: 4
+session_length_lambdas:
+  - 10
+
+similarity_levels:
+  low: 0.0
+  medium: 0.4
+  high: 0.8
+  super_high: 1.0
+
+# RNG seeds (apply to numpy.random and python random)
+seed:
+  numpy: 42
+  random: 42
+
+
+# (Inside simulation_core.py, for example)
+persona_map:
+    "patient_001": "9-to-5er"
+    "patient_002": "9-to-5er"
+    "patient_003": "Compulsive Checker"
+    "patient_004": "Compulsive Checker"
+    "patient_005": "Night Owl"
+    "patient_006": "Night Owl"
+    "patient_007": "Influencer"
+    "patient_008": "Influencer"
+
+# Experiment orchestration defaults (used by generate_data.py)
+experiment:
+  session_length_lambdas: [3, 5, 10]            # values swept in runs
+  similarity_levels:
+    - [0.0, "low"]
+    - [0.4, "medium"]
+    - [0.8, "high"]
+    - [1.0, "super_high"]
+
+# Validator tolerances
+validation:
+  row_sum_epsilon: 1e-6
+  marginal_sum_epsilon: 1e-6
+
+# Notes:
+# - Persona transition matrices and explicit period marginals are stored per-persona as:
+#     persona_params/persona_<slug>.json
+#   Each persona JSON contains:
+#     - persona, schedule, day_parts (3 entries), period_matrices (dict-of-dicts), period_marginals, timing_params
+# - generate_data.py is the single entrypoint that:
+#     1) loads persona JSONs from `param_dir`,
+#     2) generates events (using persona timing + matrices),
+#     3) writes event CSV to event_cache_path,
+#     4) produces persona heatmap PNGs next to persona JSONs.
+
+apps:
+  - Game
+  - News
+  - Social
+  - Utility
+  - Work
+
+all_states:
+  - Game
+  - News
+  - Social
+  - Utility
+  - Work
+  - quit
