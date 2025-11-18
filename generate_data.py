@@ -9,9 +9,11 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import yaml
+import matplotlib
 from matplotlib.gridspec import GridSpec
 
 
+matplotlib.use('Agg')  # <--- Add this line to fix the error
 
 # --- Configuration (loaded only from YAML) ---
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config', 'general.yaml')
@@ -30,6 +32,7 @@ def _get(k):
 # required top-level config keys
 EVENT_CACHE_PATH = _get('event_cache_path')
 PARAM_DIR = _get('param_dir')
+PERSONA_DIR = _get('persona_dir')
 NUM_WEEKS = _get('num_weeks')
 PERSONA_MAP = _get('persona_map')
 ALL_PATIENT_IDS = list(PERSONA_MAP.keys())
@@ -568,7 +571,7 @@ if __name__ == "__main__":
 
     # 1. Load personas ONCE. This also sets the global `apps` list.
     try:
-        all_persona_params = load_persona_params(PARAM_DIR)
+        all_persona_params = load_persona_params(PERSONA_DIR)
     except FileNotFoundError as e:
         print(e)
         print("Please ensure your persona JSON files (e.g., 'persona_9-to-5er.json') are in the 'params/' directory.")

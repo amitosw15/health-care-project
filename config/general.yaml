@@ -3,7 +3,8 @@
 # Period transition matrices & persona-specific marginals remain in persona JSONs under ../persona_params/.
 
 event_cache_path: "event_data_cache_sessions_distinct.csv"
-param_dir: "config/persona_params"
+param_dir: "config/metronome"
+persona_dir: "config/types"
 persona_types_path:
   "9-to-5er": "config/types/persona_9-to-5er.json"
   "Compulsive Checker": "config/types/persona_Compulsive_Checker.json"
