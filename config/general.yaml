@@ -2,8 +2,14 @@
 # This file holds the non-matrix configuration (timing, seeds, schedules, paths).
 # Period transition matrices & persona-specific marginals remain in persona JSONs under ../persona_params/.
 
-event_cache_path: "event_data_cache_sessions_distinct.csv"
-param_dir: "config/metronome"
+event_cache_path: "data/simulated_events.csv"
+override_data: false
+reports_dir: "reports"
+output_dir: "outputs"
+transition_method: "metronome"
+distance_metrics:
+  - "euclidean"
+  - "js"
 persona_dir: "config/types"
 persona_types_path:
   "9-to-5er": "config/types/persona_9-to-5er.json"
@@ -77,5 +83,5 @@ all_states:
   - News
   - Social
   - Utility
-  - Work
+  - APPSWork
   - quit

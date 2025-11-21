@@ -27,7 +27,7 @@
     "Sleep": {"Social": 0.4, "News": 0.3, "Game": 0.2, "Utility": 0.05, "Work": 0.05}
   },
   "timing_params": {
-    "session_start_dist": {"type": "exponential", "scale": 600},
+    "session_start_dist": {"type": "fixed", "value": 600},
     "session_length_dist": {"type": "fixed", "value": 3},
     "app_duration_dist": {"type": "exponential", "scale": 60},
     "inter_event_gap_dist": {"type": "exponential", "scale": 5},

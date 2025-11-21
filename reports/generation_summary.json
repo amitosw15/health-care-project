@@ -1,0 +1,13 @@
+[
+  {
+    "lambda": 10,
+    "images_theoretical": [
+      "reports/visualizations/theoretical/theoretical_persona_9-to-5er_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_Compulsive_Checker_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_Night_Owl_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_Influencer_matrices.png"
+    ],
+    "events_file": "data/simulated_events_lambda_10.csv",
+    "events_rows": 1260978
+  }
+]
