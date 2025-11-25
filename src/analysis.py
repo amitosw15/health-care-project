@@ -49,64 +49,146 @@ def confidence_ellipse(ax, center, cov, scale, **kwargs):
         ax.add_patch(ell)
     except: pass
 
-# --- 4. FEATURIZATION LOGIC ---
+def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=1.5):
+    """
+    Core engine to calculate transitions and durations from event data using
+    Robust Global Logic (Global Sort + Thresholding).
 
-def calculate_metronome_transitions(df_minute_stream, all_states, transition_cols):
-    df_minute_stream['next_app'] = df_minute_stream['app'].shift(-1)
-    df_minute_stream['next_minute_ts'] = df_minute_stream['minute_ts'].shift(-1)
-    df_minute_stream['gap_minutes'] = (df_minute_stream['next_minute_ts'] - df_minute_stream['minute_ts']).dt.total_seconds() / 60.0
+    Args:
+        events_df (pd.DataFrame): Raw event stream.
+        time_unit (str): Frequency for exploding intervals (default '1min').
+        threshold_minutes (float): Gap size that triggers a 'quit' (default 1.5).
 
-    valid_transitions = df_minute_stream[df_minute_stream['gap_minutes'] <= 5.0].copy()
-    if valid_transitions.empty: return pd.Series(0, index=transition_cols)
-    valid_transitions = valid_transitions[valid_transitions['app']!='quit']
-    print(valid_transitions.head())
-    exit(1)
-    counts = valid_transitions.groupby(['app', 'next_app']).size().unstack(fill_value=0)
-    matrix = counts.reindex(index=all_states, columns=all_states).fillna(0.0)
-    return pd.Series(matrix.values.flatten(), index=transition_cols)
+    Returns:
+        all_transitions (pd.DataFrame): Columns [patient_id, minute_ts, from_app, to_app, hour_ts, hour]
+        minute_df (pd.DataFrame): Base minute-level data for marginals [patient_id, minute_ts, app, hour]
+    """
+    # 1. Prepare Data
+    df = events_df.copy()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.sort_values(['patient_id', 'session_id', 'timestamp'])
 
-def create_hourly_features(events_df):
-    print(f"Running METRONOME featurization... (Loaded {len(events_df)} events)")
-    apps = _get('apps')
-    all_states = _get('all_states')
+    opens = df[df['event_type'] == 'open'].copy()
+    closes = df[df['event_type'] == 'close'].copy()
 
-    events_df['timestamp'] = pd.to_datetime(events_df['timestamp'])
-    events_df = events_df.sort_values(['patient_id', 'session_id', 'timestamp'])
+    # Safety: Align opens/closes
+    min_len = min(len(opens), len(closes))
+    opens = opens.iloc[:min_len]
+    closes = closes.iloc[:min_len]
 
-    opens = events_df[events_df['event_type'] == 'open'].copy()
-    closes = events_df[events_df['event_type'] == 'close'].copy()
-
+    # Create Intervals
     intervals = opens[['patient_id', 'timestamp', 'app']].rename(columns={'timestamp': 'start'})
     intervals['end'] = closes['timestamp'].values
 
-    intervals['minute_range'] = [pd.date_range(s, e, freq='1min') for s, e in zip(intervals['start'].dt.floor('min'), intervals['end'].dt.floor('min'))]
+    # Explode to Minute Level
+    intervals['minute_range'] = [pd.date_range(s, e, freq=time_unit) for s, e in zip(intervals['start'].dt.floor('min'), intervals['end'].dt.floor('min'))]
     minute_df = intervals.explode('minute_range')[['patient_id', 'minute_range', 'app']].rename(columns={'minute_range': 'minute_ts'})
+
+    # Handle duplicates (rare overlaps)
     minute_df = minute_df.drop_duplicates(subset=['patient_id', 'minute_ts'], keep='last')
-    minute_df['hour_ts'] = minute_df['minute_ts'].dt.floor('h') # Fix deprecation
 
-    transition_cols = [f't_{fr}_to_{to}' for fr in all_states for to in all_states]
-    transition_features = minute_df.groupby(['patient_id', 'hour_ts']).apply(
-        calculate_metronome_transitions, all_states=all_states, transition_cols=transition_cols
-    ).reset_index()
+    # 2. Calculate Gaps GLOBALLY
+    minute_df = minute_df.sort_values(['patient_id', 'minute_ts'])
+    g = minute_df.groupby('patient_id')
 
+    minute_df['next_app'] = g['app'].shift(-1)
+    minute_df['next_ts'] = g['minute_ts'].shift(-1)
+    minute_df['prev_ts'] = g['minute_ts'].shift(1)
+
+    # Calculate Gaps (in Minutes)
+    minute_df['gap_next'] = (minute_df['next_ts'] - minute_df['minute_ts']).dt.total_seconds() / 60.0
+    minute_df['gap_prev'] = (minute_df['minute_ts'] - minute_df['prev_ts']).dt.total_seconds() / 60.0
+
+    # 3. Identify Transitions
+    is_cont = minute_df['gap_next'] <= threshold_minutes
+    # Gap > Threshold OR End of Data (NaN) implies Quit
+    is_quit = (minute_df['gap_next'] > threshold_minutes) | (minute_df['gap_next'].isna())
+    # Gap > Threshold OR Start of Data (NaN) implies Start
+    is_start = (minute_df['gap_prev'] > threshold_minutes) | (minute_df['gap_prev'].isna())
+
+    # 4. Collect Transitions
+    transitions_list = []
+
+    # Outgoing (App -> Next / Quit)
+    outgoing = minute_df.copy()
+    outgoing.loc[is_cont, 'to_app'] = outgoing.loc[is_cont, 'next_app']
+    outgoing.loc[is_quit, 'to_app'] = 'quit'
+    outgoing['from_app'] = outgoing['app']
+    transitions_list.append(outgoing[['patient_id', 'minute_ts', 'from_app', 'to_app']])
+
+    # Incoming (Start -> App)
+    incoming = minute_df[is_start].copy()
+    incoming['from_app'] = '__start__'
+    incoming['to_app'] = incoming['app']
+    transitions_list.append(incoming[['patient_id', 'minute_ts', 'from_app', 'to_app']])
+
+    all_transitions = pd.concat(transitions_list)
+
+    # Add time helpers
+    all_transitions['hour_ts'] = all_transitions['minute_ts'].dt.floor('h')
+    all_transitions['hour'] = all_transitions['minute_ts'].dt.hour
+    minute_df['hour'] = minute_df['minute_ts'].dt.hour
+
+    return all_transitions, minute_df
+
+def create_hourly_features(events_df, apps, all_states):
+    """
+    Generates hourly features (transitions and durations) using robust logic.
+    Args:
+        events_df: Raw event dataframe
+        apps: List of app names (for duration columns)
+        all_states: List of all states including 'quit' and '__start__'
+    """
+    print(f"Running METRONOME featurization... (Loaded {len(events_df)} events)")
+
+    # 1. Ensure special states are in the list
+    if 'quit' not in all_states: all_states.append('quit')
+    if '__start__' not in all_states: all_states.append('__start__')
+
+    # 2. Call Helper for Robust Transitions
+    # This replaces the manual interval explosion and gap calculation
+    all_transitions, minute_df = calculate_robust_transitions(events_df)
+
+    # Ensure minute_df has hour_ts for merging later
+    minute_df['hour_ts'] = minute_df['minute_ts'].dt.floor('h')
+
+    # 3. Aggregate Transitions by Hour
+    all_transitions['trans_col'] = 't_' + all_transitions['from_app'] + '_to_' + all_transitions['to_app']
+
+    # Create the matrix: Rows=Hours, Cols=Transitions
+    transition_features = all_transitions.groupby(['patient_id', 'hour_ts', 'trans_col']).size().unstack(fill_value=0)
+
+    # Reindex ensures columns like 't_Work_to_quit' exist even if counts are 0
+    expected_cols = [f't_{fr}_to_{to}' for fr in all_states for to in all_states]
+    transition_features = transition_features.reindex(columns=expected_cols, fill_value=0).reset_index()
+
+    # 4. Aggregate Durations by Hour
     duration_features = minute_df.groupby(['patient_id', 'hour_ts', 'app']).size().unstack(fill_value=0)
     duration_features = duration_features.reindex(columns=apps).fillna(0)
     duration_features.columns = [f'duration_{app}' for app in duration_features.columns]
     duration_features = duration_features.reset_index()
 
+    # 5. Merge & Formatting
     base_df = minute_df[['patient_id', 'hour_ts']].drop_duplicates()
     features = base_df.merge(duration_features, on=['patient_id', 'hour_ts'], how='left')
     features = features.merge(transition_features, on=['patient_id', 'hour_ts'], how='left').fillna(0)
-    features = features.rename(columns={'patient_id': 'patient'}) # Fix pipeline key error
+    features = features.rename(columns={'patient_id': 'patient'})
 
     features['week'] = features['hour_ts'].dt.to_period('W')
     features['hour'] = features['hour_ts'].dt.hour
-    final_cols = [c for c in features.columns if c.startswith('duration_') or c.startswith('t_')]
-    return features, final_cols
 
+    final_cols = [c for c in features.columns if c.startswith('duration_') or c.startswith('t_')]
+
+    print("Metronome featurization complete.")
+    return features, final_cols
 
 def visualize_empirical_vs_theoretical(events_df, persona_map, full_configs, output_dir, all_states, dist_metric):
     print("\n--- Generating Comparison Plots (Matrices + Marginals) ---")
+
+    # Ensure special states are in the list for consistent plotting
+    display_states = list(all_states)
+    if 'quit' not in display_states: display_states.append('quit')
+    if '__start__' not in display_states: display_states.append('__start__')
 
     unique_personas = set(persona_map.values())
     representatives = {}
@@ -121,61 +203,62 @@ def visualize_empirical_vs_theoretical(events_df, persona_map, full_configs, out
         p_config = full_configs[p_type]
         schedule = p_config.get('schedule', {})
         theo_matrices = p_config.get('period_matrices', {})
-        theo_marginals_dict = p_config.get('period_marginals', {}) # Load marginals config
+        theo_marginals_dict = p_config.get('period_marginals', {})
 
-        # --- Metronome Prep ---
+        # --- 1. ROBUST METRONOME PREP (Using Helper) ---
         p_events = events_df[events_df['patient_id'] == patient_id].copy()
         if p_events.empty: continue
-        p_events['timestamp'] = pd.to_datetime(p_events['timestamp'])
-        p_events = p_events.sort_values(['session_id', 'timestamp'])
-        opens = p_events[p_events['event_type'] == 'open'].copy()
-        closes = p_events[p_events['event_type'] == 'close'].copy()
-        intervals = opens[['timestamp', 'app']].rename(columns={'timestamp': 'start'})
-        intervals['end'] = closes['timestamp'].values
-        intervals['minute_range'] = [pd.date_range(s, e, freq='1min') for s, e in zip(intervals['start'].dt.floor('min'), intervals['end'].dt.floor('min'))]
-        minute_df = intervals.explode('minute_range')[['minute_range', 'app']].rename(columns={'minute_range': 'ts'})
-        minute_df = minute_df.drop_duplicates(subset=['ts'], keep='last')
-        minute_df['hour'] = minute_df['ts'].dt.hour
+
+        # Call the reusable helper to get clean transitions and minutes
+        p_transitions, p_minutes = calculate_robust_transitions(p_events)
 
         for period_name, (start_h, end_h) in schedule.items():
-            # Filter by Time
-            if start_h < end_h: period_mask = (minute_df['hour'] >= start_h) & (minute_df['hour'] < end_h)
-            else: period_mask = (minute_df['hour'] >= start_h) | (minute_df['hour'] < end_h)
+            # --- 2. FILTER BY SCHEDULE ---
+            # FIX: Use 'hour' (int) column for comparison, not 'hour_ts' (datetime)
+            if start_h < end_h:
+                mask_trans = (p_transitions['hour'] >= start_h) & (p_transitions['hour'] < end_h)
+                mask_mins = (p_minutes['hour'] >= start_h) & (p_minutes['hour'] < end_h)
+            else:
+                mask_trans = (p_transitions['hour'] >= start_h) | (p_transitions['hour'] < end_h)
+                mask_mins = (p_minutes['hour'] >= start_h) | (p_minutes['hour'] < end_h)
 
-            period_df = minute_df[period_mask].copy().sort_values('ts')
-            if period_df.empty: continue
+            period_trans = p_transitions[mask_trans].copy()
+            period_mins = p_minutes[mask_mins].copy()
 
-            # --- 1. CALCULATE MARGINALS (Time spent in each app) ---
+            if period_mins.empty: continue
+
+            # --- 3. CALCULATE MARGINALS (Time spent in each app) ---
             # Empirical: Simple frequency count of minutes
-            emp_marginals = period_df['app'].value_counts(normalize=True)
-            emp_marginals = emp_marginals.reindex(all_states, fill_value=0.0)
+            emp_marginals = period_mins['app'].value_counts(normalize=True)
+            emp_marginals = emp_marginals.reindex(display_states, fill_value=0.0)
 
             # Theoretical: Load from config
-            theo_marginal_vec = pd.Series(0.0, index=all_states)
+            theo_marginal_vec = pd.Series(0.0, index=display_states)
             if period_name in theo_marginals_dict:
                 for app, prob in theo_marginals_dict[period_name].items():
                     if app in theo_marginal_vec:
                         theo_marginal_vec[app] = prob
 
-            # --- 2. CALCULATE MATRICES ---
-            period_df['next_app'] = period_df['app'].shift(-1)
-            period_df['next_ts'] = period_df['ts'].shift(-1)
-            period_df['gap'] = (period_df['next_ts'] - period_df['ts']).dt.total_seconds() / 60.0
-            valid_trans = period_df[period_df['gap'] <= 5.0]
-
-            display_states = all_states
-            if not valid_trans.empty:
-                counts = valid_trans.groupby(['app', 'next_app']).size().unstack(fill_value=0)
+            # --- 4. CALCULATE EMPIRICAL MATRIX ---
+            if not period_trans.empty:
+                # Group by (from -> to) using the Robust Transitions
+                counts = period_trans.groupby(['from_app', 'to_app']).size().unstack(fill_value=0)
+                # Reindex to full square matrix including 'quit' and '__start__'
                 counts = counts.reindex(index=display_states, columns=display_states).fillna(0)
+                # Normalize
                 emp_matrix = counts.div(counts.sum(axis=1), axis=0).fillna(0)
-            else: emp_matrix = pd.DataFrame(0, index=display_states, columns=display_states)
+            else:
+                emp_matrix = pd.DataFrame(0, index=display_states, columns=display_states)
 
+            # Theoretical Matrix
             if period_name in theo_matrices:
-                theo_matrix_raw = json_matrix_to_numpy(theo_matrices[period_name], all_states)
-                theo_df = pd.DataFrame(theo_matrix_raw, index=all_states, columns=all_states)
-            else: theo_df = pd.DataFrame(0, index=display_states, columns=display_states)
+                # Assuming json_matrix_to_numpy is available
+                theo_matrix_raw = json_matrix_to_numpy(theo_matrices[period_name], display_states)
+                theo_df = pd.DataFrame(theo_matrix_raw, index=display_states, columns=display_states)
+            else:
+                theo_df = pd.DataFrame(0, index=display_states, columns=display_states)
 
-            # --- 3. PLOTTING (3 Panels) ---
+            # --- 5. PLOTTING ---
             fig, axes = plt.subplots(1, 3, figsize=(24, 7), gridspec_kw={'width_ratios': [1, 1, 0.8]})
 
             # Panel 1: Empirical Matrix
@@ -189,14 +272,13 @@ def visualize_empirical_vs_theoretical(events_df, persona_map, full_configs, out
             axes[1].set_title(f"THEORETICAL Matrix\n(Event Choice)", fontsize=12, fontweight='bold')
             axes[1].set_yticks([])
 
-            # Panel 3: Marginals Comparison (Bar Chart)
+            # Panel 3: Marginals Comparison
             df_marg = pd.DataFrame({
-                'State': all_states,
+                'State': display_states,
                 'Actual (Time)': emp_marginals.values,
                 'Theory (Config)': theo_marginal_vec.values
             })
 
-            # Melt for seaborn barplot
             df_marg_melt = df_marg.melt('State', var_name='Type', value_name='Probability')
 
             sns.barplot(data=df_marg_melt, x='State', y='Probability', hue='Type', ax=axes[2],
@@ -204,15 +286,17 @@ def visualize_empirical_vs_theoretical(events_df, persona_map, full_configs, out
             axes[2].set_title(f"Marginal Distribution\n(Time vs Config)", fontsize=12, fontweight='bold')
             axes[2].set_ylim(0, 1.0)
             axes[2].tick_params(axis='x', rotation=45)
+
             compare_dir = os.path.join(output_dir, "compare_theoretical_empirical", dist_metric)
             os.makedirs(compare_dir, exist_ok=True)
             plt.tight_layout()
-            plt.savefig(os.path.join(compare_dir, f"compare_{p_type.replace(' ', '_')}_{period_name}.png"))
+            filep = os.path.join(compare_dir, f"compare_{p_type.replace(' ', '_')}_{period_name}.png")
+            print(f"Saving comparison plot for persona '{p_type}' during period '{period_name}' to {filep}...")
+            plt.savefig(filep)
             plt.close()
 
-
 def run_analysis_pipeline(train_df, test_df, feature_cols, persona_map, dist_metric='js', visualization_method='tsne', title_prefix=""):
-    print(f"\n--- Running Pipeline: {title_prefix} (JS Distance) ---")
+    print(f"\n--- Running Pipeline: {title_prefix} ({dist_metric}) ---")
     try: output_dir = _get('output_dir')
     except KeyError: output_dir = "js_clustering_outputs"
     os.makedirs(output_dir, exist_ok=True)
@@ -263,7 +347,7 @@ def run_analysis_pipeline(train_df, test_df, feature_cols, persona_map, dist_met
                 if (s < e and s <= h < e) or (s > e and (h >= s or h < e)): return f"{p} ({lbl})"
         return f"{p} (Other)"
 
-    k_values = [5, 10, 15, 20, 25]
+    k_values = [10, 15]
     all_states = _get('all_states')
     n_states = len(all_states)
 
@@ -315,7 +399,7 @@ def run_analysis_pipeline(train_df, test_df, feature_cols, persona_map, dist_met
             else: continue
 
             row_sums = act_mat.sum(axis=1, keepdims=True)
-            act_mat_norm = np.divide(act_mat, row_sums, out=np.zeros_like(act_mat), where=row_sums!=0)
+            act_mat_norm = np.divide(act_mat, row_sums, out=np.zeros_like(act_mat, dtype=float), where=row_sums!=0)
 
             top_3 = counts.head(3).index.tolist()
             n_plots = 1 + len(top_3)
@@ -369,23 +453,22 @@ if __name__ == "__main__":
         lambdas = _get('session_length_lambdas')
         distance_metrics = _get('distance_metrics')
         PERSONA_MAP = _get('persona_map')
+        apps = _get('apps')
+        all_states = _get('all_states')
         for lambda_ in lambdas:
             cur_file = file.replace('.csv', f'_lambda_{lambda_}.csv')
             print(f"Loading event data from file '{cur_file}'...")
             events_df = pd.read_csv(cur_file)
-            hourly_df, feature_cols = create_hourly_features(events_df)
+            hourly_df, feature_cols = create_hourly_features(events_df,apps, all_states)
             max_week = hourly_df['week'].max()
             train_df = hourly_df[hourly_df['week'] < max_week].copy()
             test_df = hourly_df[hourly_df['week'] == max_week].copy()
             for dist_metric in distance_metrics:
                 run_analysis_pipeline(train_df, test_df, feature_cols, PERSONA_MAP, dist_metric, visualization_method=_get('visualization_method'), title_prefix=os.path.basename(file))
                 output_dir = _get('output_dir')
-                all_states = _get('all_states')
                 config_paths = _get('persona_types_path')
                 full_configs = load_full_persona_configs(config_paths)
                 visualize_empirical_vs_theoretical(events_df, PERSONA_MAP, full_configs, output_dir, all_states, dist_metric)
                 print(f"\nAnalysis complete for lambda={lambda_}.")
     except Exception as e:
         print(f"Fatal Error: {e}")
-    import traceback
-    traceback.print_exc()

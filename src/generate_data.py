@@ -153,7 +153,7 @@ def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
     events = []
 
     total_seconds = num_weeks * 7 * 24 * 60 * 60
-    start_sim_time = time.time() - total_seconds # Start sim `num_weeks` ago
+    start_sim_time = time.time() - total_seconds
 
     print(f"Generating {num_weeks} weeks of data for {len(patient_ids)} patients...")
 
@@ -162,25 +162,19 @@ def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
         if not persona_name:
             print(f"Warning: No persona found for patient {patient_id}. Skipping.")
             continue
-
         persona_params = copy.deepcopy(all_persona_params[persona_name])
 
-        # --- This is the new logic you requested ---
-        # 1. Get timing parameters unique to this persona
         timing_params = persona_params.get('timing_params')
         if not timing_params:
             print(f"Warning: No 'timing_params' found for persona '{persona_name}'. Skipping.")
             continue
 
-        # 2. Override the session_length lambda if provided by the experiment
-        #    This is the common value for all patients in this run
         if session_lambda_override is not None:
             if 'session_length_dist' in timing_params:
                 timing_params['session_length_dist']['lambda'] = session_lambda_override
             else:
                 print(f"Warning: 'session_length_dist' not in timing_params for {persona_name}.")
 
-        # --- End of new logic ---
         if session_start_override is not None:
             if 'session_start_dist' in timing_params:
                 timing_params['session_start_dist']['value'] = session_start_override
@@ -188,7 +182,7 @@ def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
             else:
                 print(f"Warning: 'session_length_dist' not in timing_params for {persona_name}.")
 
-        patient_time = start_sim_time # Each patient starts at the beginning
+        patient_time = start_sim_time
         session_id_counter = 0
 
         while patient_time < time.time():
@@ -252,9 +246,17 @@ def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
                     "event_type": "open"
                 })
 
+                # 8. How long until next app?
+                try:
+                    gap  = random.uniform(0.001, 0.050)
+                except KeyError:
+                    print(f"Error: 'inter_event_gap_dist' missing in timing_params for {persona_name}.")
+                    gap = 0
+
+
                 # 6. How long was the app open?
                 try:
-                    duration = 1 # for one min
+                    duration = 60.0 - gap
                 except KeyError:
                     print(f"Error: 'app_duration_dist' missing in timing_params for {persona_name}.")
                     duration = 1
@@ -269,13 +271,6 @@ def generate_full_event_stream_sessions(num_weeks, patient_ids, persona_map,
                     "app": current_app,
                     "event_type": "close"
                 })
-
-                # 8. How long until next app?
-                try:
-                    gap  = random.uniform(0.001, 0.050)
-                except KeyError:
-                    print(f"Error: 'inter_event_gap_dist' missing in timing_params for {persona_name}.")
-                    gap = 0
 
                 patient_time += gap
 
@@ -435,101 +430,131 @@ def plot_and_save_empirical_heatmaps(name_tag, empirical_matrices, persona_param
 
     return saved_images
 
-def calculate_empirical_matrices(event_df, persona_params_map, persona_map, apps_list):
+def calculate_empirical_matrices(event_df, persona_params_map, persona_map, apps_list,
+                                                gap_threshold_seconds=5.0): # <--- DEFINED THRESHOLD
     """
-    Calculates the actual, empirical transition matrices from the generated event data.
+    Calculates empirical matrices by reconstructing sessions based on time gaps.
     """
+    # 1. Prepare Data
     if 'event_type' not in event_df.columns:
-        print("Warning: 'event_type' column not found. Assuming all events are 'open' events.")
-        open_events_df = event_df.copy()
-    else:
-        open_events_df = event_df[event_df['event_type'].str.lower() == 'open'].copy()
+        return {}
 
-    if open_events_df.empty:
-        print("No 'open' events found. Cannot calculate empirical matrices.")
-        return {}  # MUST return a dict, not None
+    # Sort strictly by time to ensure Open/Close alignment
+    df = event_df.sort_values(by=['patient_id', 'timestamp']).copy()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-    open_events_df['timestamp'] = pd.to_datetime(open_events_df['timestamp'])
-    open_events_df['persona'] = open_events_df['patient_id'].map(persona_map)
+    # 2. Reconstruct "App Instances" (Start -> End)
+    # We assume the data is strictly ordered: Open -> Close -> Open -> Close
+    # We take the 'open' rows as the start, and the shifted 'timestamp' as the end
+    open_rows = df[df['event_type'] == 'open'].copy()
+    close_rows = df[df['event_type'] == 'close'].copy()
+    # Safety Check: alignment
+    if len(open_rows) != len(close_rows):
+        print("Warning: Mismatch in Open/Close counts. Data might be corrupted.")
+        # (Optional: Add complex alignment logic here if needed, skipping for brevity)
+
+    # Create a DataFrame of "Visits"
+    visits_df = open_rows[['patient_id', 'session_id', 'timestamp', 'app']].rename(
+        columns={'timestamp': 'start_time'}
+    ).reset_index(drop=True)
+
+    # We grab the timestamps from the close_rows
+    visits_df['end_time'] = close_rows['timestamp'].values
+
+    # Map Personas and Periods (using start_time)
+    visits_df['persona'] = visits_df['patient_id'].map(persona_map)
 
     def map_period(row):
         persona = row['persona']
-        if persona not in persona_params_map:
-            return "UnknownPersona"
+        if persona not in persona_params_map: return "Unknown"
         day_parts = persona_params_map[persona].get('day_parts', [])
-        return get_period_from_timestamp(row['timestamp'], day_parts)
+        return get_period_from_timestamp(row['start_time'], day_parts)
 
-    # 1. Get the period for EVERY open event first
-    open_events_df['event_period'] = open_events_df.apply(map_period, axis=1)
-    open_events_df = open_events_df.sort_values(by=['patient_id', 'session_id', 'timestamp'])
+    visits_df['period'] = visits_df.apply(map_period, axis=1)
 
-    # 2. Set the from_app
-    open_events_df['from_app'] = open_events_df['app']
-    print("============================================")
+    # 3. Calculate "Next Start" and "Gap"
+    # We group by Patient to ensure we don't compare the last app of Patient A with first of Patient B
+    g = visits_df.groupby('patient_id')
 
-# --- DEBUGGING STEP 1: Filter by Patient ID (Creates printdf with a subset index) ---
-    patient_id_filter = (open_events_df['patient_id'] == 'patient_003')
-    printdf = open_events_df[patient_id_filter].copy() # Use .copy() to be safe
-    print(printdf.head())
+    visits_df['next_app'] = g['app'].shift(-1)
+    visits_df['next_start_time'] = g['start_time'].shift(-1)
 
-    # --- DEBUGGING STEP 2: Filter by Event Period (Correctly filters the printdf subset) ---
-    # Now you filter the EXISTING printdf using a condition that matches its index.
-    # The original error was caused by trying to apply this condition to the full 'open_events_df'.
-    period_filter = (printdf['event_period'] == 'Work')
-    printdf = printdf[period_filter].copy() # Filter the subset
-    print(printdf.head())
+    # THE CRITICAL CALCULATION:
+    # Gap = (Start of Next App) - (End of Current App)
+    visits_df['gap_duration'] = visits_df['next_start_time'] - visits_df['end_time']
 
-    print("============================================")
+    # 4. Determine Transitions
+    threshold = pd.Timedelta(seconds=gap_threshold_seconds)
 
-    # --- DEBUGGING STEP 3: Filter by Event Type (Correctly filters the printdf subset) ---
-    printdf = printdf[printdf["event_type"] == 'close'].copy()
-    print(printdf.head())
+    # Condition: Session Break if Gap > Threshold OR if it's the last event (next_app is NaN)
+    is_session_break = (visits_df['gap_duration'] > threshold) | (visits_df['next_app'].isna())
 
-    print("============================================")
-    # 3. Get the to_app AND the period of the to_app
-    g = open_events_df.groupby(['patient_id', 'session_id'])
-    open_events_df['to_app'] = g['app'].shift(-1)
-    open_events_df['period'] = g['event_period'].shift(-1)
+    # --- Build the Transition List ---
+    transitions = []
 
-    # 4. Drop rows that have no destination app (or destination period)
-    transitions_df = open_events_df.dropna(subset=['to_app', 'period'])
+    # Add '__start__' for the very first event of each patient
+    # (Or based on threshold logic for "first of session")
+    visits_df['prev_end_time'] = g['end_time'].shift(1)
+    visits_df['gap_from_prev'] = visits_df['start_time'] - visits_df['prev_end_time']
+    is_session_start = (visits_df['gap_from_prev'] > threshold) | (visits_df['gap_from_prev'].isna())
 
+    # A. Handle "Start -> App" transitions
+    start_events = visits_df[is_session_start].copy()
+    if not start_events.empty:
+        start_events['from_app'] = '__start__'
+        start_events['to_app'] = start_events['app'] # The current app is the destination
+        transitions.append(start_events[['patient_id', 'persona', 'period', 'from_app', 'to_app']])
 
-    if transitions_df.empty:
-        print("No transitions found. Cannot calculate empirical matrices.")
-        return {}  # MUST return a dict, not None
+    # B. Handle "App -> Quit" transitions (Where session breaks)
+    quit_events = visits_df[is_session_break].copy()
+    if not quit_events.empty:
+        quit_events['from_app'] = quit_events['app']
+        quit_events['to_app'] = 'quit'
+        transitions.append(quit_events[['patient_id', 'persona', 'period', 'from_app', 'to_app']])
 
-    # 5. Now, group by the destination's period (which is correctly named 'period')
-    counts = transitions_df.groupby(['persona', 'period', 'from_app', 'to_app']).size().unstack(fill_value=0)
+    # C. Handle "App -> Next App" transitions (Where session continues)
+    continue_events = visits_df[~is_session_break].copy()
+    if not continue_events.empty:
+        continue_events['from_app'] = continue_events['app']
+        continue_events['to_app'] = continue_events['next_app']
+        transitions.append(continue_events[['patient_id', 'persona', 'period', 'from_app', 'to_app']])
+
+    # 5. Combine and Calculate Counts
+    if not transitions:
+        return {}
+
+    all_transitions = pd.concat(transitions, ignore_index=True)
+
+    # Ensure our apps list has the states
+    plot_apps_list = list(apps_list) + ['__start__', 'quit']
+    plot_apps_list = list(set(plot_apps_list)) # De-dupe
+
+    # Group and Normalize (Same as before)
+    counts = all_transitions.groupby(['persona', 'period', 'from_app', 'to_app']).size().unstack(fill_value=0)
 
     empirical_matrices = {}
-    all_personas = counts.index.get_level_values('persona').unique()
 
-    for persona in all_personas:
-        if persona not in empirical_matrices:
-            empirical_matrices[persona] = {}
+    # ... (Rest of your standard matrix normalization logic) ...
+    # Be sure to reindex using plot_apps_list!
 
-        if persona not in counts.index:
-            continue
+    for persona in counts.index.get_level_values('persona').unique():
+        empirical_matrices[persona] = {}
+        if persona not in counts.index: continue
 
         persona_counts = counts.loc[persona]
-        all_periods = persona_counts.index.get_level_values('period').unique()
-
-        for period in all_periods:
-            if period not in persona_counts.index:
-                continue
+        for period in persona_counts.index.get_level_values('period').unique():
+            if period not in persona_counts.index: continue
 
             matrix = persona_counts.loc[period]
-            matrix_df = matrix.reindex(index=apps_list, columns=apps_list).fillna(0.0)
+            # Reindex with the FULL list including start/quit
+            matrix_df = matrix.reindex(index=plot_apps_list, columns=plot_apps_list).fillna(0.0)
 
             row_sums = matrix_df.sum(axis=1)
             row_sums[row_sums == 0] = 1
             matrix_df = matrix_df.div(row_sums, axis=0)
-
             empirical_matrices[persona][period] = matrix_df
 
     return empirical_matrices
-# --- MAIN EXECUTION BLOCK (REFACTORED) ---
 
 if __name__ == "__main__":
     results = []
@@ -550,8 +575,6 @@ if __name__ == "__main__":
     print(f"Saved {len(theo_imgs)} THEORETICAL persona matrix images to {theoretical_dir}")
 
 
-    # 3. Loop using parameters from the YAML config
-    #    The `run_one_experiment` logic is now inlined here.
     for session_lambda in SESSION_LENGTH_LAMBDAS:
         print(f"\n=== RUN: lambda={session_lambda} ===")
         if OVERRIDE_DATA := _get('override_data'):
@@ -587,20 +610,14 @@ if __name__ == "__main__":
         ev_df['timestamp'] = pd.to_datetime(ev_df['timestamp'])
         max_time = ev_df['timestamp'].max()
 
-        # --- Analysis for "one week" ---
-        one_week_df = ev_df[ev_df['timestamp'] >= max_time - pd.Timedelta(weeks=1)]
-        if not one_week_df.empty:
-            print(f"Analyzing last week of data ({len(one_week_df)} rows)...")
-            empirical_matrices_week = calculate_empirical_matrices(one_week_df, all_persona_params, PERSONA_MAP, apps)
-            empirical_week_dir = os.path.join(VISUALIZATION_DIR, 'empiricali_week')
-            # Save to a unique file for this run
-            emp_imgs_week = plot_and_save_empirical_heatmaps(
-                f"empirical_last_week_lambda_{session_lambda}",
-                empirical_matrices_week, all_persona_params, apps, empirical_week_dir
-            )
-            print(f"Saved {len(emp_imgs_week)} EMPIRICAL (1 week) matrix images to {empirical_week_dir}")
-        else:
-            print("No data in the last week to analyze.")
+        empirical_matrices_week = calculate_empirical_matrices(ev_df, all_persona_params, PERSONA_MAP, apps)
+        empirical_week_dir = os.path.join(VISUALIZATION_DIR, 'empiricali_week')
+        # Save to a unique file for this run
+        emp_imgs_week = plot_and_save_empirical_heatmaps(
+            f"empirical_last_week_lambda_{session_lambda}",
+            empirical_matrices_week, all_persona_params, apps, empirical_week_dir
+        )
+        print(f"Saved {len(emp_imgs_week)} EMPIRICAL (1 week) matrix images to {empirical_week_dir}")
 
 
         results.append({

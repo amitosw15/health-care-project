@@ -1,0 +1,4 @@
+﻿.PHONY: create_data
+
+run_data:
+	src/generate_data --override_data

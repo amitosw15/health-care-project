@@ -1,0 +1,49 @@
+{
+  "persona": "random_user",
+  "schedule": {
+    "Work": [9, 17],
+    "Recreation": [17, 23],
+    "Night": [23, 9]
+  },
+  "day_parts": [
+    {"name": "Work", "start_hour": 9, "end_hour": 17},
+    {"name": "Recreation", "start_hour": 17, "end_hour": 23},
+    {"name": "Night", "start_hour": 23, "end_hour": 9}
+  ],
+  "period_matrices": {
+    "Work": {
+      "News": {"News": 0.04, "Social": 0.01, "Game": 0.0, "Work": 0.75, "Utility": 0.10, "quit": 0.1},
+      "Social": {"News": 0.40, "Social": 0.40, "Game": 0.0, "Work": 0.05, "Utility": 0.14, "quit": 0.01},
+      "Game": {"News": 0.04, "Social": 0.01, "Game": 0.0, "Work": 0.10, "Utility": 0.05, "quit": 0.9},
+      "Work": {"News": 0.03, "Social": 0.01, "Game": 0.0, "Work": 0.85, "Utility": 0.05, "quit": 0.06},
+      "Utility": {"News": 0.03, "Social": 0.01, "Game": 0.0, "Work": 0.90, "Utility": 0.01, "quit": 0.05}
+    },
+    "Recreation": {
+      "News": {"News": 0.10, "Social": 0.40, "Game": 0.30, "Work": 0.05, "Utility": 0.15, "quit": 0.0},
+      "Social": {"News": 0.30, "Social": 0.10, "Game": 0.30, "Work": 0.05, "Utility": 0.25, "quit": 0.0},
+      "Game": {"News": 0.20, "Social": 0.50, "Game": 0.10, "Work": 0.05, "Utility": 0.15, "quit": 0.0},
+      "Work": {"News": 0.10, "Social": 0.60, "Game": 0.20, "Work": 0.0,  "Utility": 0.10, "quit": 0.0},
+      "Utility": {"News": 0.10, "Social": 0.60, "Game": 0.20, "Work": 0.0,  "Utility": 0.10, "quit": 0.0}
+    },
+    "Night": {
+      "News": {"News": 0.35, "Social": 0.30, "Game": 0.05, "Work": 0.0, "Utility": 0.0, "quit": 0.3},
+      "Social": {"News": 0.10, "Social": 0.50, "Game": 0.10, "Work": 0.0, "Utility": 0.0, "quit": 0.3},
+      "Game": {"News": 0.10, "Social": 0.10, "Game": 0.80, "Work": 0.0, "Utility": 0.00, "quit": 0.0},
+      "Work": {"News": 0.10, "Social": 0.90, "Game": 0.0,  "Work": 0.0, "Utility": 0.0, "quit": 0.0},
+      "Utility": {"News": 0.05, "Social": 0.50, "Game": 0.25, "Work": 0.0, "Utility": 0.0, "quit": 0.2}
+    }
+  },
+  "period_marginals": {
+    "Work": {"Work": 0.80, "Utility": 0.15, "News": 0.01, "Social": 0.04, "Game": 0.0, "quit": 0.0},
+    "Recreation": {"Social": 0.6, "News": 0.1, "Game": 0.1, "Utility": 0.1, "Work": 0.1, "quit": 0.0},
+    "Night": {"Social": 0.7, "Game": 0.25, "News": 0.05, "Utility": 0.0, "Work": 0.0, "quit": 0.0}
+  },
+  "timing_params": {
+    "session_start_dist": {"type": "exponential", "scale": 600},
+    "session_length_dist": {"type": "fixed", "value": 3},
+    "app_duration_dist": {"type": "exponential", "scale": 60},
+    "inter_event_gap_dist": {"type": "exponential", "scale": 5},
+    "aside_prob": 0.0,
+    "aside_duration_dist": {"type": "exponential", "scale": 300}
+  }
+}

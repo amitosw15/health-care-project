@@ -5,9 +5,14 @@
       "reports/visualizations/theoretical/theoretical_persona_9-to-5er_matrices.png",
       "reports/visualizations/theoretical/theoretical_persona_Compulsive_Checker_matrices.png",
       "reports/visualizations/theoretical/theoretical_persona_Night_Owl_matrices.png",
-      "reports/visualizations/theoretical/theoretical_persona_Influencer_matrices.png"
+      "reports/visualizations/theoretical/theoretical_persona_Influencer_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_one_app_user_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_cycle_user_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_random_user_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_choose_and_stuck_user_matrices.png",
+      "reports/visualizations/theoretical/theoretical_persona_zipzapper_user_matrices.png"
     ],
     "events_file": "data/simulated_events_lambda_10.csv",
-    "events_rows": 1260978
+    "events_rows": 507914
   }
 ]

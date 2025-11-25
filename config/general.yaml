@@ -3,7 +3,7 @@
 # Period transition matrices & persona-specific marginals remain in persona JSONs under ../persona_params/.
 
 event_cache_path: "data/simulated_events.csv"
-override_data: false
+override_data: true
 reports_dir: "reports"
 output_dir: "outputs"
 transition_method: "metronome"
@@ -12,10 +12,15 @@ distance_metrics:
   - "js"
 persona_dir: "config/types"
 persona_types_path:
-  "9-to-5er": "config/types/persona_9-to-5er.json"
-  "Compulsive Checker": "config/types/persona_Compulsive_Checker.json"
-  "Night Owl": "config/types/persona_Night_Owl.json"
-  "Influencer": "config/types/persona_Influencer.json"
+  "one_app_user": "config/types/persona_one_app_user.json"
+  "zipzapper_user": "config/types/persona_zipzapper_user.json"
+  "choose_and_stuck_user": "config/types/persona_choose_and_stuck_user.json"
+  "cycle_user": "config/types/persona_cycle_user.json"
+  "random_user": "config/types/persona_random_user.json"
+#  "9-to-5er": "config/types/persona_9-to-5er.json"
+#  "Compulsive Checker": "config/types/persona_Compulsive_Checker.json"
+#  "Night Owl": "config/types/persona_Night_Owl.json"
+#  "Influencer": "config/types/persona_Influencer.json"
 # simulation framing
 hours_per_day: 24
 days_per_week: 7
@@ -37,14 +42,16 @@ seed:
 
 # (Inside simulation_core.py, for example)
 persona_map:
-    "patient_001": "9-to-5er"
-    "patient_002": "9-to-5er"
-    "patient_003": "Compulsive Checker"
-    "patient_004": "Compulsive Checker"
-    "patient_005": "Night Owl"
-    "patient_006": "Night Owl"
-    "patient_007": "Influencer"
-    "patient_008": "Influencer"
+    "patient_001": "one_app_user"
+    "patient_002": "one_app_user"
+    "patient_003": "zipzapper_user"
+    "patient_004": "zipzapper_user"
+    "patient_005": "choose_and_stuck_user"
+    "patient_006": "choose_and_stuck_user"
+    "patient_007": "cycle_user"
+    "patient_008": "cycle_user"
+    "patient_009": "random_user"
+    "patient_010": "random_user"
 
 # Experiment orchestration defaults (used by generate_data.py)
 experiment:
@@ -83,5 +90,6 @@ all_states:
   - News
   - Social
   - Utility
-  - APPSWork
+  - Work
   - quit
+  - __start__
