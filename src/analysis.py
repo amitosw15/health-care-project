@@ -49,7 +49,7 @@ def confidence_ellipse(ax, center, cov, scale, **kwargs):
         ax.add_patch(ell)
     except: pass
 
-def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=1.5):
+def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=1.5, debug_info=None):
     """
     Core engine to calculate transitions and durations from event data using
     Robust Global Logic (Global Sort + Thresholding).
@@ -58,11 +58,22 @@ def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=
         events_df (pd.DataFrame): Raw event stream.
         time_unit (str): Frequency for exploding intervals (default '1min').
         threshold_minutes (float): Gap size that triggers a 'quit' (default 1.5).
+        debug_info (dict, optional): Dictionary with 'patient_id', 'p_type', 'period_name' for debug prints.
 
     Returns:
         all_transitions (pd.DataFrame): Columns [patient_id, minute_ts, from_app, to_app, hour_ts, hour]
         minute_df (pd.DataFrame): Base minute-level data for marginals [patient_id, minute_ts, app, hour]
     """
+    # Determine if we should print debug info for this call
+    do_debug = debug_info and \
+               debug_info.get('p_type') == 'choose_and_stuck_user'
+
+    if do_debug:
+        print(f"\n--- DEBUGGING calculate_robust_transitions for {debug_info['p_type']} ({debug_info['patient_id']}) ---")
+        print(f"Initial events_df shape: {events_df.shape}")
+        # Filter events_df to the specific patient if needed for more focused debugging
+        # (This function already gets events_df for a single patient from visualize_empirical_vs_theoretical)
+
     # 1. Prepare Data
     df = events_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -71,14 +82,34 @@ def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=
     opens = df[df['event_type'] == 'open'].copy()
     closes = df[df['event_type'] == 'close'].copy()
 
+    if do_debug:
+        print(f"\n--- After Open/Close extraction ---")
+        print(f"opens shape: {opens.shape}")
+        print(f"closes shape: {closes.shape}")
+        with pd.option_context('display.max_rows', 10):
+            if not opens.empty: print("opens head:\n", opens.head())
+            if not closes.empty: print("closes head:\n", closes.head())
+
+
     # Safety: Align opens/closes
     min_len = min(len(opens), len(closes))
     opens = opens.iloc[:min_len]
     closes = closes.iloc[:min_len]
 
+    if do_debug:
+        print(f"\n--- After aligning opens/closes (min_len={min_len}) ---")
+        print(f"opens shape: {opens.shape}")
+        print(f"closes shape: {closes.shape}")
+
     # Create Intervals
     intervals = opens[['patient_id', 'timestamp', 'app']].rename(columns={'timestamp': 'start'})
     intervals['end'] = closes['timestamp'].values
+
+    if do_debug:
+        print(f"\n--- Intervals created ---")
+        print(f"intervals shape: {intervals.shape}")
+        with pd.option_context('display.max_rows', 10):
+            if not intervals.empty: print("intervals head:\n", intervals.head())
 
     # Explode to Minute Level
     intervals['minute_range'] = [pd.date_range(s, e, freq=time_unit) for s, e in zip(intervals['start'].dt.floor('min'), intervals['end'].dt.floor('min'))]
@@ -86,6 +117,12 @@ def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=
 
     # Handle duplicates (rare overlaps)
     minute_df = minute_df.drop_duplicates(subset=['patient_id', 'minute_ts'], keep='last')
+
+    if do_debug:
+        print(f"\n--- Minute-level DataFrame (minute_df) ---")
+        print(f"minute_df shape: {minute_df.shape}")
+        with pd.option_context('display.max_rows', 20):
+            if not minute_df.empty: print("minute_df (after explode and drop_duplicates):\n", minute_df) # Show more rows
 
     # 2. Calculate Gaps GLOBALLY
     minute_df = minute_df.sort_values(['patient_id', 'minute_ts'])
@@ -99,12 +136,26 @@ def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=
     minute_df['gap_next'] = (minute_df['next_ts'] - minute_df['minute_ts']).dt.total_seconds() / 60.0
     minute_df['gap_prev'] = (minute_df['minute_ts'] - minute_df['prev_ts']).dt.total_seconds() / 60.0
 
+    if do_debug:
+        print(f"\n--- Minute-level DataFrame with Gaps ---")
+        with pd.option_context('display.max_rows', 20):
+            if not minute_df.empty: print("minute_df (with gaps):\n", minute_df[['patient_id', 'minute_ts', 'app', 'next_app', 'gap_next', 'gap_prev']])
+
     # 3. Identify Transitions
     is_cont = minute_df['gap_next'] <= threshold_minutes
-    # Gap > Threshold OR End of Data (NaN) implies Quit
     is_quit = (minute_df['gap_next'] > threshold_minutes) | (minute_df['gap_next'].isna())
-    # Gap > Threshold OR Start of Data (NaN) implies Start
     is_start = (minute_df['gap_prev'] > threshold_minutes) | (minute_df['gap_prev'].isna())
+
+    if do_debug:
+        print(f"\n--- Transition Flags ---")
+        print(f"is_cont (True if gap <= {threshold_minutes} min): {is_cont.sum()} entries")
+        print(f"is_quit (True if gap > {threshold_minutes} min or NaN): {is_quit.sum()} entries")
+        print(f"is_start (True if gap > {threshold_minutes} min or NaN): {is_start.sum()} entries")
+        
+        print("\n--- Quit Details ---")
+        with pd.option_context('display.max_rows', 20):
+            print(minute_df[is_quit][['minute_ts', 'app', 'gap_next']])
+
 
     # 4. Collect Transitions
     transitions_list = []
@@ -123,6 +174,12 @@ def calculate_robust_transitions(events_df, time_unit='1min', threshold_minutes=
     transitions_list.append(incoming[['patient_id', 'minute_ts', 'from_app', 'to_app']])
 
     all_transitions = pd.concat(transitions_list)
+
+    if do_debug:
+        print(f"\n--- All Transitions Collected ---")
+        print(f"all_transitions shape: {all_transitions.shape}")
+        with pd.option_context('display.max_rows', 20):
+            if not all_transitions.empty: print("all_transitions head:\n", all_transitions) # Show more rows
 
     # Add time helpers
     all_transitions['hour_ts'] = all_transitions['minute_ts'].dt.floor('h')
@@ -209,10 +266,15 @@ def visualize_empirical_vs_theoretical(events_df, persona_map, full_configs, out
         p_events = events_df[events_df['patient_id'] == patient_id].copy()
         if p_events.empty: continue
 
-        # Call the reusable helper to get clean transitions and minutes
-        p_transitions, p_minutes = calculate_robust_transitions(p_events)
+        # Prepare debug_info for passing to calculate_robust_transitions
+        debug_info = {'patient_id': patient_id, 'p_type': p_type, 'period_name': None}
 
         for period_name, (start_h, end_h) in schedule.items():
+            debug_info['period_name'] = period_name # Update period_name for current iteration
+
+            # Call the reusable helper to get clean transitions and minutes
+            p_transitions, p_minutes = calculate_robust_transitions(p_events, debug_info=debug_info)
+            
             # --- 2. FILTER BY SCHEDULE ---
             # FIX: Use 'hour' (int) column for comparison, not 'hour_ts' (datetime)
             if start_h < end_h:
@@ -310,35 +372,45 @@ def run_analysis_pipeline(train_df, test_df, feature_cols, persona_map, dist_met
             if 'schedule' in data: persona_schedules[p] = data['schedule']
     except KeyError: return
 
+    # --- FEATURE ENGINEERING MODIFICATION ---
+    # 1. Select both duration and transition columns for a richer feature set.
+    duration_cols = [c for c in feature_cols if c.startswith('duration_')]
     transition_cols = [c for c in feature_cols if c.startswith('t_')]
-    train_X_raw = train_df[transition_cols].values
-    test_X_raw = test_df[transition_cols].values
-    eps = 1e-9
-    train_X_probs = np.divide(train_X_raw + eps, train_X_raw.sum(axis=1, keepdims=True) + eps * train_X_raw.shape[1])
-    test_X_probs = np.divide(test_X_raw + eps, test_X_raw.sum(axis=1, keepdims=True) + eps * test_X_raw.shape[1])
+    combined_feature_cols = duration_cols + transition_cols
+
+    train_X_raw = train_df[combined_feature_cols].values
+    test_X_raw = test_df[combined_feature_cols].values
+
+    # 2. Apply StandardScaler to the combined raw counts.
+    # This is crucial because duration and transition counts are on different scales.
+    # Scaling ensures both feature types contribute fairly to the clustering.
+    feature_scaler = StandardScaler()
+    train_X_scaled = feature_scaler.fit_transform(train_X_raw)
+    # Note: We would use this scaler to transform test_X_raw as well if we were predicting.
+
+    # The rest of the pipeline will now use `train_X_scaled`
+    # --- END MODIFICATION ---
 
     train_labels = pd.Series(train_df['patient'].values).map(persona_map).values
 
-    if visualization_method == 'tsne':
-        if dist_metric == 'js':
-            if os.path.exists(os.path.join(output_dir, 'js_distance_matrix.npy')):
-                print("Loading precomputed JS distance matrix...")
-                dist_mat = np.load(os.path.join(output_dir, 'js_distance_matrix.npy'))
-            else:
-                dist_mat = compute_robust_js_matrix(train_X_probs)
-                np.save(os.path.join(output_dir, 'js_distance_matrix.npy'), dist_mat)
-        elif dist_metric == 'euclidean':
-            dist_mat = squareform(pdist(train_X_probs, metric='euclidean'))
-        else:
-            print(f"Unknown distance metric: {dist_metric}. Defaulting to Euclidean.")
-            dist_mat = squareform(pdist(train_X_probs, metric='euclidean'))
-        print("Running t-SNE...")
-        vis_coords = TSNE(n_components=2, metric='precomputed', init='random', random_state=42).fit_transform(dist_mat)
-    else:
-        vis_coords = PCA(n_components=2, random_state=42).fit_transform(train_X_probs)
+    # Note: The JS distance metric was designed for probability distributions.
+    # Since we are now using scaled raw counts, Euclidean distance is more appropriate.
+    # The `dist_metric` parameter will be less meaningful unless we add specific logic for it.
+    # For now, we proceed with the scaled data, which works well with standard KMeans (Euclidean).
 
-    scaler = StandardScaler()
-    vis_coords = scaler.fit_transform(vis_coords)
+    if visualization_method == 'tsne':
+        # t-SNE is often slow. For a quicker feedback loop, especially with many points,
+        # running PCA first can be beneficial, but we'll stick to the original logic.
+        print("Running t-SNE...")
+        # metric='euclidean' is the default and appropriate for our scaled data.
+        tsne = TSNE(n_components=2, metric='euclidean', init='random', random_state=42, perplexity=30)
+        vis_coords = tsne.fit_transform(train_X_scaled)
+    else:
+        vis_coords = PCA(n_components=2, random_state=42).fit_transform(train_X_scaled)
+
+    # This scaler is for the 2D visualization, not the clustering itself.
+    vis_scaler = StandardScaler()
+    vis_coords = vis_scaler.fit_transform(vis_coords)
 
     def get_label(row):
         p, h = row['persona'], row['hour_ts'].hour
@@ -353,10 +425,13 @@ def run_analysis_pipeline(train_df, test_df, feature_cols, persona_map, dist_met
 
     for k in k_values:
         print(f"\n>>> Processing K={k} <<<")
-        if dist_metric == 'euclidean':
-            kmeans = KMeans(n_clusters=k, random_state=42).fit(train_X_probs)
-        elif dist_metric == 'js':
-            kmeans = JSKMeans(n_clusters=k, random_state=42).fit(train_X_probs)
+        # K-Means will now run on the scaled, combined features.
+        if dist_metric == 'js':
+            print("Warning: JS distance is intended for probability distributions. With scaled features, standard KMeans (Euclidean) is used.")
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(train_X_scaled)
+        else: # dist_metric == 'euclidean'
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(train_X_scaled)
+            
         train_clusters = kmeans.labels_
         h_score = homogeneity_score(train_labels, train_clusters)
         c_score = completeness_score(train_labels, train_clusters)
@@ -449,6 +524,10 @@ def run_analysis_pipeline(train_df, test_df, feature_cols, persona_map, dist_met
 if __name__ == "__main__":
     try:
         print("===== STARTING ANALYSIS PIPLINE =====")
+        # Caching directory
+        CACHE_DIR = ".cache"
+        os.makedirs(CACHE_DIR, exist_ok=True)
+
         file = _get('event_cache_path')
         lambdas = _get('session_length_lambdas')
         distance_metrics = _get('distance_metrics')
@@ -459,7 +538,24 @@ if __name__ == "__main__":
             cur_file = file.replace('.csv', f'_lambda_{lambda_}.csv')
             print(f"Loading event data from file '{cur_file}'...")
             events_df = pd.read_csv(cur_file)
-            hourly_df, feature_cols = create_hourly_features(events_df,apps, all_states)
+
+            cache_file = os.path.join(CACHE_DIR, f"hourly_features_lambda_{lambda_}.pkl")
+            
+            if os.path.exists(cache_file):
+                print(f"Loading cached features from '{cache_file}'...")
+                import pickle
+                with open(cache_file, 'rb') as f:
+                    cache_data = pickle.load(f)
+                hourly_df = cache_data['hourly_df']
+                feature_cols = cache_data['feature_cols']
+            else:
+                hourly_df, feature_cols = create_hourly_features(events_df,apps, all_states)
+                
+                print(f"Caching features to '{cache_file}'...")
+                import pickle
+                with open(cache_file, 'wb') as f:
+                    pickle.dump({'hourly_df': hourly_df, 'feature_cols': feature_cols}, f)
+
             max_week = hourly_df['week'].max()
             train_df = hourly_df[hourly_df['week'] < max_week].copy()
             test_df = hourly_df[hourly_df['week'] == max_week].copy()
